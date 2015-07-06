@@ -12,7 +12,9 @@ REMOTE_HOST="10.60.0.4"
 # Common "name" for client certificates
 # For example, generated certs will be named this way:
 # client1, client2, etc.
-CLIENT_COMMON="client"
+CLIENT_COMMON="grp1_"
+
+LOGDIR=/var/log
 
 
 ###############################################################
@@ -65,7 +67,7 @@ resolv-retry infinite
 nobind
 persist-key
 persist-tun
-ca ca.crt
+ca $CLIENT_COMMON$COUNT.ca.crt
 cert $CLIENT_COMMON$COUNT.crt
 key $CLIENT_COMMON$COUNT.key
 comp-lzo yes
@@ -79,10 +81,10 @@ echo "local $REMOTE_HOST
 port $SERVER_PORT
 proto $SERVER_PROTO
 dev tun
-ca ca.crt
-cert server.crt
-key server.key  # This file should be kept secret
-dh dh1024.pem
+ca ${SERVER_COMMON}.ca.crt
+cert ${SERVER_COMMON}.crt
+key ${SERVER_COMMON}.key  # This file should be kept secret
+dh ${SERVER_COMMON}.dh${KEY_SIZE}.pem
 #crl-verify crl.pem
 server 10.8.0.0 255.255.255.0
 push \"redirect-gateway\"
@@ -92,18 +94,18 @@ push \"dhcp-option DNS 78.140.128.205\"
 duplicate-cn
 keepalive 10 120
 max-clients 20
-user root
-group nobody
+user ${DAEMON_USER-'root'}
+group ${DAEMON_GROUP-'nogroup'}
 persist-key
 persist-tun
-status openvpn-status.log
-log-append openvpn.log
+status $LOGDIR/openvpn-${CLIENT_COMMON}-status.log
+log-append $LOGDIR/openvpn-${CLIENT_COMMON}.log
 verb 4
 mute 20
 comp-lzo
-#sndbuf 131072
-#rcvbuf 131072
-" > ${SERVER_DIR}/server.conf
+sndbuf 131072
+rcvbuf 131072
+" > ${SERVER_DIR}/server_${SERVER_COMMON}.conf
 }
 
 # build crt & key
@@ -120,7 +122,7 @@ function main_create_certs() {
 echo 'How many client certificates you need to create?'
 echo 'Enter desired total number:'
 read CERTS
-if [ -z $REMOTE_HOST ]; then
+if [ -z "$REMOTE_HOST" ]; then
     echo 'Specify Openvpn server IP:'
     read REMOTE_HOST
 fi
@@ -128,8 +130,8 @@ fi
 #checking certs number
 if [[ ${CERTS} =~ ^[0-9]+$ ]]
 then
-if [ "$KEY_DIR" ]; then  
-    mkdir -p "$KEY_DIR"   
+if [ "$KEY_DIR" ]; then
+    mkdir -p "$KEY_DIR"
     chmod go-rwx "$KEY_DIR"
     touch "$KEY_DIR/index.txt"
     echo 01 > "$KEY_DIR/serial"
@@ -156,13 +158,13 @@ fi
 # compile together server keys & config file"
 mkdir -p "${SERVER_DIR}"
 # CA"
-cp "${KEY_DIR}/ca.crt" "${SERVER_DIR}"
+cp "${KEY_DIR}/ca.crt" "${SERVER_DIR}/${SERVER_COMMON}.ca.crt"
 # Server cert"
 mv "${KEY_DIR}/${SERVER_COMMON}.crt" "${SERVER_DIR}"
 # Server key"
 mv "${KEY_DIR}/${SERVER_COMMON}.key" "${SERVER_DIR}"
 # DH"
-mv "${KEY_DIR}/dh${KEY_SIZE}.pem" "${SERVER_DIR}"
+mv "${KEY_DIR}/dh${KEY_SIZE}.pem" "${SERVER_DIR}/${SERVER_COMMON}.dh${KEY_SIZE}.pem"
 # put server config to 'server.conf'"
 server_conf_gen
 
@@ -170,13 +172,13 @@ server_conf_gen
 COUNT=0
 while [ ${COUNT} -ne ${CERTS} ]
 do COUNT=$(expr ${COUNT} + 1)
-        cp "${KEY_DIR}/ca.crt" "${CLIENT_DIR}${COUNT}/"
+        cp "${KEY_DIR}/ca.crt" "${CLIENT_DIR}${COUNT}/${CLIENT_DIR}${COUNT}.ca.crt"
         echo ${COUNT} > "${CLIENT_DIR}${COUNT}/serial"
         pack_client
 done
 else
-    echo ''
-    echo  'Numbers of certificates should be numeric!'
+    echo 
+    echo 'Numbers of certificates should be numeric!'
 exit
 fi
 }
@@ -218,8 +220,8 @@ while [ ${COUNT} -ne ${CERTS_END} ]
 	        pack_client
     done
 else
-    echo ''
-    echo  'Numbers of certificates should be numeric!'
+    echo
+    echo 'Numbers of certificates should be numeric!'
 exit
 
 fi
@@ -227,7 +229,8 @@ fi
 
 # revoke a certificate
 function main_revoke_cert() {
-echo 'Please enter client certificate name (CN=) to deny access:'
+echo 'Please copy the .crt and .key files of required client to ./keys folder first!'
+echo 'Please enter client certificate name to deny access:'
 read CLIENT_ID
 
 "$EASY_RSA/revoke-full" $CLIENT_ID
@@ -248,7 +251,7 @@ function clean_files() {
 
 # help
 function show_help() {
-    echo "Usage : $0 new | create | add | revoke | clean"
+    echo "Usage : $0   new | create | add | revoke | clean"
     exit
 }
 
@@ -272,10 +275,8 @@ case "$1" in
 	show_help
 	;;
     * )
-	echo "Please enter correct command."
-	echo "Try with: $0 help"
+	echo 'Please enter correct command.'
+	show_help
 	exit 0
 	;;
 esac
-
-	
